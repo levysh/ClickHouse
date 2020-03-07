@@ -2,6 +2,7 @@
 #include "ZooKeeperImpl.h"
 #include "KeeperException.h"
 #include "TestKeeper.h"
+#include "EtcdKeeper.h"
 
 #include <random>
 #include <functional>
@@ -55,7 +56,13 @@ void ZooKeeper::init(const std::string & implementation, const std::string & hos
     operation_timeout_ms = operation_timeout_ms_;
     chroot = chroot_;
 
-    if (implementation == "zookeeper")
+    if (implementation == "zookeeper" || implementation == "etcdkeeper" || implementation == "testkeeper")
+    {
+        impl = std::make_unique<Coordination::EtcdKeeper>(
+                chroot,
+                Poco::Timespan(0, operation_timeout_ms_ * 1000));
+    }
+    else if (implementation == "zookeeper")
     {
         if (hosts.empty())
             throw KeeperException("No addresses passed to ZooKeeper constructor.", Coordination::ZBADARGUMENTS);
