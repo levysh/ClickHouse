@@ -5,6 +5,7 @@
 #if USE_GRPC
 
 #include <boost/algorithm/string.hpp>
+#include <common/logger_useful.h>
 
 #include <Common/ZooKeeper/EtcdKeeper.h>
 #include <Common/setThreadName.h>
@@ -205,42 +206,71 @@ namespace Coordination
         CompletionQueue & cq,
         EtcdKeeper::TxnRequests & requests)
     {
+        std::cout << "XID " << call_.xid << std::endl;
         TxnRequest txn_request;
         for (const auto & txn_compare: requests.compares)
         {
             Compare* compare = txn_request.add_compare();
+            std::cout << "START COMP " << txn_compare.key() << std::endl;
+            std::cout << "VERSION " << txn_compare.version() << std::endl;
+            // if (txn_compare.version().IsInitialized()) {
+            //     std::cout << "VERSION " << txn_compare.version() << std::endl;
+            // }
+            // if (txn_compare.value().ByteSize()) {
+            //     std::cout << "VALUE " << txn_compare.value() << std::endl;
+            // }
+            // if (txn_compare.create_revision().ByteSize()) {
+            //     std::cout << "CREATE_REV " << txn_compare.create_revision() << std::endl;
+            // }
+            // if (txn_compare.mod_revision().ByteSize()) {
+            //     std::cout << "MOD_REV " << txn_compare.mod_revision() << std::endl;
+            // }
             compare->CopyFrom(txn_compare);
         }
         for (const auto & success_range: requests.success_ranges)
         {
             RequestOp* req_success = txn_request.add_success();
-            req_success->set_allocated_request_range(std::make_unique<RangeRequest>(success_range).release());
+            auto req = std::make_unique<RangeRequest>(success_range);
+            std::cout << "SUCC RANGE " << req->key() << std::endl;
+            req_success->set_allocated_request_range(req.release());
         }
         for (const auto & success_put: requests.success_puts)
         {
             RequestOp* req_success = txn_request.add_success();
-            req_success->set_allocated_request_put(std::make_unique<PutRequest>(success_put).release());
+            auto req = std::make_unique<PutRequest>(success_put);
+            std::cout << "SUCC PUT " << req->key() << " " << req->value() << std::endl;
+            req_success->set_allocated_request_put(req.release());
         }
         for (const auto & success_delete_range: requests.success_delete_ranges)
         {
             RequestOp* req_success = txn_request.add_success();
-            req_success->set_allocated_request_delete_range(std::make_unique<DeleteRangeRequest>(success_delete_range).release());
+            auto req = std::make_unique<DeleteRangeRequest>(success_delete_range);
+            std::cout << "SUCC DEL RANGE " << req->key() << std::endl;
+            req_success->set_allocated_request_delete_range(req.release());
         }
         for (const auto & failure_range: requests.failure_ranges)
         {
             RequestOp* req_failure = txn_request.add_failure();
-            req_failure->set_allocated_request_range(std::make_unique<RangeRequest>(failure_range).release());
+            auto req = std::make_unique<RangeRequest>(failure_range);
+            std::cout << "SUCC FAILURE " << req->key() << std::endl;
+            req_failure->set_allocated_request_range(req.release());
         }
         for (const auto & failure_put: requests.failure_puts)
         {
             RequestOp* req_failure = txn_request.add_failure();
-            req_failure->set_allocated_request_put(std::make_unique<PutRequest>(failure_put).release());
+            auto req = std::make_unique<PutRequest>(failure_put);
+            std::cout << "FAIL PUT " << req->key() << " " << req->value() << std::endl;
+            req_failure->set_allocated_request_put(req.release());
         }
         for (const auto & failure_delete_range: requests.failure_delete_ranges)
         {
             RequestOp* req_failure = txn_request.add_failure();
-            req_failure->set_allocated_request_delete_range(std::make_unique<DeleteRangeRequest>(failure_delete_range).release());
+            auto req = std::make_unique<DeleteRangeRequest>(failure_delete_range);
+            std::cout << "FAIL DEL RANGE " << req->key() << std::endl;
+            req_failure->set_allocated_request_delete_range(req.release());
         }
+
+        std::cout << "XID " << call_.xid << std::endl;
 
         EtcdKeeper::AsyncTxnCall* call = new EtcdKeeper::AsyncTxnCall(call_);
         call->response_reader = stub->PrepareAsyncTxn(&call->context, txn_request, &cq);
@@ -527,11 +557,12 @@ namespace Coordination
         }
         EtcdKeeperResponsePtr makeResponseFromTag(void* got_tag)
         {
+            EtcdKeeper::AsyncTxnCall* call = static_cast<EtcdKeeper::AsyncTxnCall*>(got_tag);
+            std::cout << "RESP XID " << xid << " " << call->response.succeeded() << "              " << call->response.DebugString() << std::endl;
             if (response->error != Error::ZOK)
             {
                 return response;
             }
-            EtcdKeeper::AsyncTxnCall* call = static_cast<EtcdKeeper::AsyncTxnCall*>(got_tag);
             return makeResponseFromRepeatedPtrField(call->response.succeeded(), call->response.responses());
         }
         virtual void parsePreResponses() {}
@@ -545,11 +576,13 @@ namespace Coordination
                     pre_call_responses.emplace_back(field);
                 }
                 post_call_called = true;
+                std::cout << "!!!!!!!!!!!!!!!!!!!!! CALL REQUIRED " << (response->error == Error::ZOK) << std::endl;
                 parsePreResponses();
                 return response->error == Error::ZOK;
             }
             else
             {
+                std::cout << "!!!!!!!!!!!!!!!!!!!!! CALL REQUIRED " << 0 << std::endl;
                 return false;
             }
         }
@@ -736,7 +769,7 @@ namespace Coordination
                     const auto & range_resp = resp.response_range();
                     for (const auto & kv : range_resp.kvs())
                     {
-                        std::cout << "XID " << xid << "KEY " << kv.key();
+                        // std::cout << "XID " << xid << "KEY " << kv.key();
                         if (startsWith(kv.key(), etcd_key.getChildsPrefix()))
                         {
                             if (range_resp.count() > removing_childs_count)
@@ -1554,13 +1587,13 @@ namespace Coordination
         watch_stream = watch_stub->AsyncWatch(&watch_context, &watch_cq, reinterpret_cast<void*> (BiDiTag::CONNECT));
         readWatchResponse();
 
-        std::shared_ptr<Channel> lease_channel = grpc::CreateChannel(host, grpc::InsecureChannelCredentials());
-        lease_stub = Lease::NewStub(lease_channel);
+        // std::shared_ptr<Channel> lease_channel = grpc::CreateChannel(host, grpc::InsecureChannelCredentials());
+        // lease_stub = Lease::NewStub(lease_channel);
 
-        requestLease(std::chrono::seconds(KEEP_ALIVE_TTL_S));
+        // requestLease(std::chrono::seconds(KEEP_ALIVE_TTL_S));
 
-        keep_alive_stream = lease_stub->AsyncLeaseKeepAlive(&keep_alive_context, &lease_cq, reinterpret_cast<void*> (BiDiTag::CONNECT));
-        readLeaseKeepAliveResponse();
+        // keep_alive_stream = lease_stub->AsyncLeaseKeepAlive(&keep_alive_context, &lease_cq, reinterpret_cast<void*> (BiDiTag::CONNECT));
+        // readLeaseKeepAliveResponse();
 
         if (!root_path.empty())
         {
@@ -1568,10 +1601,14 @@ namespace Coordination
                 root_path.pop_back();
         }
 
+        // LOG_FATAL(&Poco::Logger::get("mainThread"), "start callThread");
         call_thread = ThreadFromGlobalPool([this] { callThread(); });
+        // LOG_FATAL(&Poco::Logger::get("mainThread"), "start completeThread");
         complete_thread = ThreadFromGlobalPool([this] { completeThread(); });
+        // LOG_FATAL(&Poco::Logger::get("mainThread"), "start watchCompleteThread");
         watch_complete_thread = ThreadFromGlobalPool([this] { watchCompleteThread(); });
-        lease_complete_thread = ThreadFromGlobalPool([this] { leaseCompleteThread(); });
+        // LOG_FATAL(&Poco::Logger::get("mainThread"), "started all threads");
+        // lease_complete_thread = ThreadFromGlobalPool([this] { leaseCompleteThread(); });
     }
 
     EtcdKeeper::~EtcdKeeper()
@@ -1595,7 +1632,8 @@ namespace Coordination
 
     void EtcdKeeper::callThread()
     {
-        setThreadName("EtcdKeeperCall");
+        setThreadName("EtcdCall");
+        LOG_FATAL(&Poco::Logger::get("callThread"), "start");
 
         auto prev_heartbeat_time = clock::now();
 
@@ -1660,7 +1698,7 @@ namespace Coordination
                     prev_heartbeat_time = clock::now();
                     LeaseKeepAliveRequest keep_alive_request;
                     keep_alive_request.set_id(lease_id);
-                    keep_alive_stream->Write(keep_alive_request, reinterpret_cast<void*> (BiDiTag::WRITE));
+                    // keep_alive_stream->Write(keep_alive_request, reinterpret_cast<void*> (BiDiTag::WRITE));
                 }
             }
         }
@@ -1673,7 +1711,8 @@ namespace Coordination
 
     void EtcdKeeper::completeThread()
     {
-        setThreadName("EtcdKeeperComplete");
+        setThreadName("EtcdComplete");
+        LOG_FATAL(&Poco::Logger::get("completeThread"), "start");
 
         try
         {
@@ -1703,7 +1742,9 @@ namespace Coordination
 
                     if (!call->status.ok())
                     {
-                        // LOG_ERROR(log, "RPC FAILED: " << call->status.error_message());
+
+                        // LOG_ERROR(&Poco::Logger::get("MainThread"), "RPC FAILED: " << call->status.error_message());
+                        std::cout << "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! RPC FAILED " << call->status.error_message();
                     }
                     else
                     {
@@ -1712,6 +1753,7 @@ namespace Coordination
                             response = request_info.request->makeResponseFromTag(got_tag);
                             if (!response->finished)
                             {
+                                std::cout << "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! NOT FINISHED" << std::endl;
                                 request_info.request->clear();
                                 {
                                     std::lock_guard lock(push_request_mutex);
@@ -1752,7 +1794,8 @@ namespace Coordination
 
     void EtcdKeeper::watchCompleteThread()
     {
-        setThreadName("EtcdKeeperWatchComplete");
+        setThreadName("EtcdWatch");
+        LOG_FATAL(&Poco::Logger::get("EtcdKeeperWatchComplete"), "start");
 
         void* got_tag;
         bool ok = false;
@@ -1791,7 +1834,9 @@ namespace Coordination
 
     void EtcdKeeper::leaseCompleteThread()
     {
-        setThreadName("EtcdKeeperLeaseComplete");
+        setThreadName("EtcdLease");
+
+	LOG_FATAL(&Poco::Logger::get("EtcdKeeperLeaseComplete"), "start");
 
         void* got_tag;
         bool ok = false;
@@ -1841,11 +1886,11 @@ namespace Coordination
         complete_thread.join();
         watch_complete_thread.join();
 
-        LeaseRevokeRequest revoke_request;
-        LeaseRevokeResponse revoke_response;
-        ClientContext lease_revoke_context;
-        revoke_request.set_id(lease_id);
-        lease_stub->LeaseRevoke(&lease_revoke_context, revoke_request, &revoke_response);
+        // LeaseRevokeRequest revoke_request;
+        // LeaseRevokeResponse revoke_response;
+        // ClientContext lease_revoke_context;
+        // revoke_request.set_id(lease_id);
+        // lease_stub->LeaseRevoke(&lease_revoke_context, revoke_request, &revoke_response);
 
         try
         {

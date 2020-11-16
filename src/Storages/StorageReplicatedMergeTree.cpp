@@ -3759,6 +3759,7 @@ void StorageReplicatedMergeTree::alter(
         Coordination::Requests ops;
 
         String new_metadata_str = future_metadata_in_zk.toString();
+	std::cout << "!!!!!!!!!!!!!!!!!!!!!!!!!!!NEW_MET" << metadata_version << std::endl;
         ops.emplace_back(zkutil::makeSetRequest(zookeeper_path + "/metadata", new_metadata_str, metadata_version));
 
         String new_columns_str = future_metadata.columns.toString();
@@ -3844,6 +3845,7 @@ void StorageReplicatedMergeTree::alter(
         }
         else if (rc == Coordination::Error::ZBADVERSION)
         {
+            std::cout << "!!!!!!!!!!!!!!!!ALTER " << (results[0]->error == Coordination::Error::ZBADVERSION) << std::endl;
             if (results[0]->error != Coordination::Error::ZOK)
                 throw Exception("Metadata on replica is not up to date with common metadata in Zookeeper. Cannot alter",
                     ErrorCodes::CANNOT_ASSIGN_ALTER);
